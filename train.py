@@ -9,6 +9,7 @@ from six.moves import cPickle
 
 from utils import TextLoader
 from model import Model
+import random 
 
 def main():
     parser = argparse.ArgumentParser()
@@ -16,17 +17,17 @@ def main():
                        help='data directory containing input.txt')
     parser.add_argument('--save_dir', type=str, default='save',
                        help='directory to store checkpointed models')
-    parser.add_argument('--rnn_size', type=int, default=128,
+    parser.add_argument('--rnn_size', type=int, default=256,
                        help='size of RNN hidden state')
-    parser.add_argument('--num_layers', type=int, default=2,
+    parser.add_argument('--num_layers', type=int, default=3,
                        help='number of layers in the RNN')
     parser.add_argument('--model', type=str, default='lstm',
                        help='rnn, gru, or lstm')
     parser.add_argument('--batch_size', type=int, default=50,
                        help='minibatch size')
-    parser.add_argument('--seq_length', type=int, default=50,
+    parser.add_argument('--seq_length', type=int, default=20,
                        help='RNN sequence length')
-    parser.add_argument('--num_epochs', type=int, default=50,
+    parser.add_argument('--num_epochs', type=int, default=100,
                        help='number of epochs')
     parser.add_argument('--save_every', type=int, default=1000,
                        help='save frequency')
@@ -47,10 +48,26 @@ def main():
     args = parser.parse_args()
     train(args)
 
-def train(args):
-    data_loader = TextLoader(args.data_dir, args.batch_size, args.seq_length)
-    args.vocab_size = data_loader.vocab_size
-    
+my_data = np.genfromtxt('music_matrix.csv', delimiter=',')
+
+def next_batch(data):
+    x = []
+    y = []
+    for i in range(50): 
+        x_tmp = []
+        y_tmp = []
+        r_num = random.randint(0,len(data)) 
+        for step in range(20):
+            i = (r_num+step) % len(data) 
+            j = (r_num+step+1) % len(data)
+            x_tmp.append(data[i:]) 
+            y_tmp.append(data[j:])
+        x.append(x_tmp)
+        y.append(y_tmp)
+    return np.array(x),np.array(y)
+
+def train(args): 
+    args.vocab_size = 1000
     # check compatibility if training is continued from previously saved model
     if args.init_from is not None:
         # check if all necessary files exist 
@@ -71,13 +88,9 @@ def train(args):
         # open saved vocab/dict and check if vocabs/dicts are compatible
         with open(os.path.join(args.init_from, 'chars_vocab.pkl')) as f:
             saved_chars, saved_vocab = cPickle.load(f)
-        assert saved_chars==data_loader.chars, "Data and loaded model disagree on character set!"
-        assert saved_vocab==data_loader.vocab, "Data and loaded model disagree on dictionary mappings!"
         
     with open(os.path.join(args.save_dir, 'config.pkl'), 'wb') as f:
         cPickle.dump(args, f)
-    with open(os.path.join(args.save_dir, 'chars_vocab.pkl'), 'wb') as f:
-        cPickle.dump((data_loader.chars, data_loader.vocab), f)
         
     model = Model(args)
 
@@ -89,12 +102,12 @@ def train(args):
             saver.restore(sess, ckpt.model_checkpoint_path)
         for e in range(args.num_epochs):
             sess.run(tf.assign(model.lr, args.learning_rate * (args.decay_rate ** e)))
-            data_loader.reset_batch_pointer()
             state = sess.run(model.initial_state)
-            for b in range(data_loader.num_batches):
+            for b in range(len(my_data)/50):
                 start = time.time()
-                x, y = data_loader.next_batch()
+                x, y = next_batch(my_data)
                 feed = {model.input_data: x, model.targets: y}
+
                 for i, (c, h) in enumerate(model.initial_state):
                     feed[c] = state[i].c
                     feed[h] = state[i].h
@@ -111,4 +124,5 @@ def train(args):
                     print("model saved to {}".format(checkpoint_path))
 
 if __name__ == '__main__':
+    os.environ["CUDA_VISIBLE_DEVICES"]="0"
     main()
